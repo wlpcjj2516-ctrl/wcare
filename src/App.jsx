@@ -841,37 +841,54 @@ export default function App() {
       {showExport && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:999, overflowY:'auto', padding:'20px 16px' }}>
           <div style={{ maxWidth:600, margin:'0 auto' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
               <div>
                 <div style={{ fontWeight:700, fontSize:18 }}>📤 ส่งออกภาพแผล</div>
                 <div style={{ fontSize:13, color:'#94a3b8', marginTop:3 }}>
-                  {exportImages.length === 0 ? 'กำลังสร้างภาพ...' : `สร้างแล้ว ${exportImages.length} ภาพ · กด ⬇️ เพื่อดาวน์โหลด`}
+                  {exportImages.length === 0 ? 'กำลังสร้างภาพ...' : `สร้างแล้ว ${exportImages.length} ภาพ · กดปุ่มด้านล่างเพื่อดาวน์โหลดพร้อมกัน`}
                 </div>
               </div>
               <button className="btn btn-ghost" onClick={()=>setShowExport(false)}>✕ ปิด</button>
             </div>
+
+            {/* ปุ่มดาวน์โหลดทั้งหมด */}
+            {exportImages.length > 0 && (
+              <button className="btn btn-blue" style={{ width:'100%', marginBottom:16, fontSize:15, padding:'12px 0' }}
+                onClick={() => {
+                  exportImages.forEach((item, i) => {
+                    setTimeout(() => {
+                      const a = document.createElement('a')
+                      a.href = item.url
+                      a.download = `wound_POD${item.pod}_${selectedSite?.name}_${item.date}.jpg`
+                      document.body.appendChild(a)
+                      a.click()
+                      document.body.removeChild(a)
+                    }, i * 600)
+                  })
+                }}>
+                ⬇️ ดาวน์โหลดทั้งหมดพร้อมกัน ({exportImages.length} ภาพ)
+              </button>
+            )}
+
             {exportImages.length === 0 && <div style={{ textAlign:'center', padding:60, color:'#64748b' }}><div className="spinner" style={{ margin:'0 auto 16px' }} /><div>กำลังสร้างภาพ...</div></div>}
-            <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
               {exportImages.map((item,i) => (
                 <div key={item.date} className="card" style={{ overflow:'hidden' }}>
                   <div style={{ padding:'10px 14px', background:'rgba(14,165,233,0.1)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <span style={{ fontWeight:700, fontSize:13 }}>POD {item.pod} · {formatDate(item.date)}</span>
-                    <span style={{ fontSize:12, color:'#64748b' }}>กดค้างที่ภาพหรือดาวน์โหลด</span>
-                  </div>
-                  <img src={item.url} alt={`POD ${item.pod}`} style={{ width:'100%', display:'block' }} />
-                  <div style={{ padding:'10px 14px' }}>
                     <a href={item.url} download={`wound_POD${item.pod}_${selectedSite?.name}_${item.date}.jpg`}
-                      style={{ display:'block', textAlign:'center', background:'linear-gradient(135deg,#0ea5e9,#0284c7)', color:'#fff', borderRadius:10, padding:'9px 0', fontSize:14, fontWeight:700, textDecoration:'none' }}>
-                      ⬇️ ดาวน์โหลด
+                      style={{ background:'rgba(14,165,233,0.2)', color:'#38bdf8', borderRadius:8, padding:'3px 12px', fontSize:12, fontWeight:700, textDecoration:'none' }}>
+                      ⬇️
                     </a>
                   </div>
+                  <img src={item.url} alt={`POD ${item.pod}`} style={{ width:'100%', display:'block' }} />
                 </div>
               ))}
             </div>
             {exportImages.length > 0 && (
               <div style={{ marginTop:16, padding:'14px 16px', background:'rgba(14,165,233,0.08)', borderRadius:12, fontSize:13, color:'#94a3b8', lineHeight:1.8 }}>
                 💡 <strong style={{ color:'#e2e8f0' }}>วิธีส่ง LINE:</strong><br/>
-                1. กด ⬇️ ดาวน์โหลด → บันทึกลงเครื่อง<br/>
+                1. กด <strong style={{color:'#e2e8f0'}}>ดาวน์โหลดทั้งหมด</strong> → บันทึกลงเครื่อง<br/>
                 2. เปิด LINE → เลือกแชทแพทย์ → แนบรูปจาก Camera Roll
               </div>
             )}
