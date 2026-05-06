@@ -68,7 +68,7 @@ export default function App() {
   const [editSiteForm, setEditSiteForm] = useState({ name: '', location: '' })
   const [editingSite, setEditingSite] = useState(null)
 
-  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null })
+  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0] })
   const [compareMode, setCompareMode] = useState({ a: null, b: null })
   const [lightboxImg, setLightboxImg] = useState(null)
   const [selectMode, setSelectMode] = useState(false)
@@ -205,11 +205,13 @@ export default function App() {
       const imageUrl = urlData.publicUrl
 
       // Save record to DB
+      const recDate = uploadForm.date || new Date().toISOString().split('T')[0]
+      const recDay = Math.max(0, Math.floor((new Date(recDate) - new Date(selectedPatient.surgery_date)) / 86400000))
       await supabase.from('wound_records').insert({
         id: Date.now(),
         site_id: selectedSite.id,
-        date: new Date().toISOString().split('T')[0],
-        day: daysSince(selectedPatient.surgeryDate),
+        date: recDate,
+        day: recDay,
         time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
         status: uploadForm.status,
         note: uploadForm.note,
@@ -217,7 +219,7 @@ export default function App() {
       })
       await loadAll()
       showToast('✅ บันทึกภาพแผลแล้ว')
-      setUploadForm({ status: 'normal', note: '', imageUrl: null, file: null })
+      setUploadForm({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0] })
       setView('site')
     } catch (e) {
       console.error(e)
@@ -327,7 +329,7 @@ export default function App() {
           </>}
           {selectedSite && <>
             <span style={{ color:'#334155' }}>›</span>
-            <span style={{ color:'#e2e8f0', fontWeight:600, fontSize:12 }}>{selectedSite.name}</span>
+            <span style={{ color:'#e2e8f0', fontWeight:600, fontSize:12 }}>{selectedSite.name.length > 8 ? selectedSite.name.substring(0,8)+'...' : selectedSite.name}</span>
           </>}
         </div>
       </div>
@@ -603,6 +605,10 @@ export default function App() {
                 <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={handleImageChange} />
               </div>
               <div style={{ marginBottom:13 }}>
+                <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>วันที่ถ่ายภาพ</label>
+                <input type="date" value={uploadForm.date} onChange={e=>setUploadForm(f=>({...f,date:e.target.value}))} />
+              </div>
+              <div style={{ marginBottom:13 }}>
                 <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>สถานะแผล</label>
                 <select value={uploadForm.status} onChange={e=>setUploadForm(f=>({...f,status:e.target.value}))}>
                   {WOUND_STATUS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -614,7 +620,7 @@ export default function App() {
               </div>
               <div style={{ display:'flex', gap:11 }}>
                 <button className="btn btn-blue" style={{ flex:1 }} onClick={handleUpload} disabled={!uploadForm.file||saving}>{saving?'⏳ กำลังอัปโหลด...':'บันทึก'}</button>
-                <button className="btn btn-ghost" onClick={()=>setView('site')}>ยกเลิก</button>
+                <button className="btn btn-ghost" onClick={()=>{ setUploadForm({status:'normal',note:'',imageUrl:null,file:null,date:new Date().toISOString().split('T')[0]}); setView('site') }}>ยกเลิก</button>
               </div>
             </div>
           </div>
