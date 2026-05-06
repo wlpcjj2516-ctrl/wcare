@@ -68,7 +68,7 @@ export default function App() {
   const [editSiteForm, setEditSiteForm] = useState({ name: '', location: '' })
   const [editingSite, setEditingSite] = useState(null)
 
-  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0] })
+  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0], shift: '' })
   const [editingRecord, setEditingRecord] = useState(null) // record being edited
   const [editRecForm, setEditRecForm] = useState({ status: 'normal', note: '', date: '', newImageUrl: null, newFile: null })
   const [confirmDeleteRec, setConfirmDeleteRec] = useState(null) // record to delete
@@ -108,7 +108,7 @@ export default function App() {
         if (!recsMap[r.site_id]) recsMap[r.site_id] = []
         recsMap[r.site_id].push({
           id: r.id, siteId: r.site_id, date: r.date, day: r.day,
-          time: r.time, status: r.status, note: r.note, imageUrl: r.image_url
+          time: r.time, shift: r.shift, status: r.status, note: r.note, imageUrl: r.image_url
         })
       })
       setRecords(recsMap)
@@ -280,13 +280,14 @@ export default function App() {
         date: recDate,
         day: recDay,
         time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+        shift: uploadForm.shift,
         status: uploadForm.status,
         note: uploadForm.note,
         image_url: imageUrl,
       })
       await loadAll()
       showToast('✅ บันทึกภาพแผลแล้ว')
-      setUploadForm({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0] })
+      setUploadForm({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0], shift: '' })
       setView('site')
     } catch (e) {
       console.error(e)
@@ -335,6 +336,13 @@ export default function App() {
         ctx.fillStyle='rgba(0,0,0,0.55)'; ctx.fillRect(x,y+IMG_H-24,80,24)
         ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'
         ctx.fillText(`🕐 ${rec.time||'--:--'}`, x+6, y+IMG_H-8)
+        if(rec.shift){
+          const shiftLabel = rec.shift==='morning'?'🌅 เช้า':rec.shift==='afternoon'?'🌤️ บ่าย':'🌙 ดึก'
+          ctx.fillStyle=rec.shift==='morning'?'rgba(234,179,8,0.8)':rec.shift==='afternoon'?'rgba(14,165,233,0.8)':'rgba(99,102,241,0.8)'
+          ctx.fillRect(x+86,y+IMG_H-24,70,24)
+          ctx.fillStyle='#fff'; ctx.font='bold 11px sans-serif'
+          ctx.fillText(shiftLabel, x+90, y+IMG_H-8)
+        }
         const iy=y+IMG_H
         const st=getStatus(rec.status)
         ctx.fillStyle=st.color+'22'; ctx.fillRect(x,iy,CELL_W,28)
@@ -353,6 +361,47 @@ export default function App() {
       resolve(canvas.toDataURL('image/jpeg',0.92))
     })
   })
+
+  // รวมภาพทั้งหมดเป็นไฟล์เดียว
+  const mergeAndDownload = async (images) => {
+    if (!images.length) return
+    // Load all images first
+    const loaded = await Promise.all(images.map(item => new Promise(resolve => {
+      const img = new Image()
+      img.onload = () => resolve({ img, item })
+      img.onerror = () => resolve(null)
+      img.src = item.url
+    })))
+    const valid = loaded.filter(Boolean)
+    if (!valid.length) return
+
+    // Calculate total canvas size
+    const W = valid[0].img.width
+    const GAP = 20
+    const totalH = valid.reduce((h, { img }) => h + img.height + GAP, 0) - GAP
+
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = totalH
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#f1f5f9'
+    ctx.fillRect(0, 0, W, totalH)
+
+    // Draw each image stacked vertically
+    let y = 0
+    valid.forEach(({ img }) => {
+      ctx.drawImage(img, 0, y, W, img.height)
+      y += img.height + GAP
+    })
+
+    // Download as single file
+    const a = document.createElement('a')
+    a.href = canvas.toDataURL('image/jpeg', 0.92)
+    a.download = `wound_${selectedPatient?.name}_${selectedSite?.name}_${new Date().toISOString().split('T')[0]}.jpg`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
 
   const handleExport = async (idsToExport) => {
     const recsToUse = idsToExport ? siteRecords.filter(r=>idsToExport.has(r.id)) : siteRecords
@@ -615,47 +664,81 @@ export default function App() {
                 <div style={{ fontSize:13, marginTop:8 }}>กด "+ บันทึกภาพวันนี้" เพื่อเริ่มต้น</div>
               </div>
             ) : (() => {
+              const SHIFT_ORDER = ['morning','afternoon','night','']
+              const SHIFT_INFO = {
+                morning:   { label:'🌅 เวรเช้า',   bg:'rgba(234,179,8,0.12)',   color:'#ca8a04',  border:'rgba(234,179,8,0.3)'   },
+                afternoon: { label:'🌤️ เวรบ่าย',  bg:'rgba(14,165,233,0.12)',  color:'#0ea5e9',  border:'rgba(14,165,233,0.3)'  },
+                night:     { label:'🌙 เวรดึก',    bg:'rgba(99,102,241,0.12)',  color:'#818cf8',  border:'rgba(99,102,241,0.3)'  },
+                '':        { label:'ไม่ระบุเวร',   bg:'rgba(255,255,255,0.04)', color:'#64748b',  border:'rgba(255,255,255,0.1)' },
+              }
               const grouped = {}
               siteRecords.forEach(r => { if(!grouped[r.date]) grouped[r.date]=[]; grouped[r.date].push(r) })
               const sortedDates = Object.keys(grouped).sort((a,b)=>b.localeCompare(a))
               return (
-                <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+                <div style={{ display:'flex', flexDirection:'column', gap:28 }}>
                   {sortedDates.map(date => {
                     const dayRecs = grouped[date]
+                    // group by shift
+                    const byShift = {}
+                    dayRecs.forEach(r => {
+                      const k = r.shift||''
+                      if(!byShift[k]) byShift[k]=[]
+                      byShift[k].push(r)
+                    })
                     return (
                       <div key={date}>
-                        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:14 }}>
+                        {/* Day header */}
+                        <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
                           <div style={{ background:'linear-gradient(135deg,#0ea5e9,#6366f1)', borderRadius:10, padding:'6px 14px', fontWeight:700, fontSize:13 }}>POD {dayRecs[0].day}</div>
-                          <div style={{ fontWeight:600, fontSize:14 }}>{formatDate(date)}</div>
+                          <div style={{ fontWeight:700, fontSize:15 }}>{formatDate(date)}</div>
                           <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.08)' }} />
                           <div style={{ fontSize:12, color:'#64748b' }}>{dayRecs.length} ภาพ</div>
                         </div>
-                        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(185px,1fr))', gap:13 }}>
-                          {dayRecs.map(rec => {
-                            const isChosen = selectedIds.has(rec.id)
-                            const photoNum = siteRecords.findIndex(r=>r.id===rec.id)+1
+                        {/* Shift groups */}
+                        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                          {SHIFT_ORDER.filter(sh => byShift[sh]?.length > 0).map(sh => {
+                            const shiftRecs = byShift[sh]
+                            const si = SHIFT_INFO[sh]
                             return (
-                              <div key={rec.id} className="card" style={{ overflow:'hidden', border:isChosen?'2px solid #0ea5e9':'2px solid transparent', transition:'border .15s' }}
-                                onClick={() => selectMode ? (isChosen ? setSelectedIds(s=>{const n=new Set(s);n.delete(rec.id);return n}) : setSelectedIds(s=>new Set([...s,rec.id]))) : setLightboxImg(rec.imageUrl)}>
-                                <div style={{ position:'relative' }}>
-                                  <img src={rec.imageUrl} alt="wound" style={{ width:'100%', height:145, objectFit:'cover', display:'block', cursor:'pointer', opacity:selectMode&&!isChosen?.6:1 }} />
-                                  <div style={{ position:'absolute', top:8, left:8, background:'rgba(15,23,42,0.75)', borderRadius:6, padding:'2px 8px', fontSize:11, color:'#fff', fontWeight:700 }}>ภาพที่ {photoNum}</div>
-                                  <div style={{ position:'absolute', bottom:8, left:8, background:'rgba(0,0,0,0.65)', borderRadius:6, padding:'2px 8px', fontSize:12, color:'#fff', fontWeight:600 }}>🕐 {rec.time||'--:--'}</div>
-                                  {selectMode && <div style={{ position:'absolute', top:8, right:8, width:26, height:26, borderRadius:'50%', background:isChosen?'#0ea5e9':'rgba(0,0,0,0.4)', border:'2px solid '+(isChosen?'#0ea5e9':'#fff'), display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'#fff', fontWeight:700 }}>{isChosen?'✓':''}</div>}
+                              <div key={sh} style={{ border:`1px solid ${si.border}`, borderRadius:12, overflow:'hidden' }}>
+                                {/* Shift header */}
+                                <div style={{ background:si.bg, padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                                  <span style={{ fontWeight:700, fontSize:13, color:si.color }}>{si.label}</span>
+                                  <span style={{ fontSize:12, color:'#64748b' }}>{shiftRecs.length} ภาพ</span>
                                 </div>
-                                <div style={{ padding:'9px 12px' }}>
-                                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                                    <span className="badge" style={{ background:getStatus(rec.status).color+'22', color:getStatus(rec.status).color }}>{getStatus(rec.status).label}</span>
-                                    {!selectMode && (
-                                      <div style={{ display:'flex', gap:6 }}>
-                                        <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px' }}
-                                          onClick={e=>{ e.stopPropagation(); setEditRecForm({status:rec.status,note:rec.note||'',date:rec.date}); setEditingRecord(rec) }}>✏️</button>
-                                        <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px', color:'#f87171', borderColor:'rgba(239,68,68,.25)' }}
-                                          onClick={e=>{ e.stopPropagation(); setConfirmDeleteRec(rec) }}>🗑️</button>
+                                {/* Photos */}
+                                <div style={{ padding:'12px', display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
+                                  {shiftRecs.map(rec => {
+                                    const isChosen = selectedIds.has(rec.id)
+                                    const photoNum = siteRecords.findIndex(r=>r.id===rec.id)+1
+                                    return (
+                                      <div key={rec.id} className="card" style={{ overflow:'hidden', border:isChosen?'2px solid #0ea5e9':'2px solid transparent', transition:'border .15s' }}
+                                        onClick={() => selectMode ? (isChosen ? setSelectedIds(s=>{const n=new Set(s);n.delete(rec.id);return n}) : setSelectedIds(s=>new Set([...s,rec.id]))) : setLightboxImg(rec.imageUrl)}>
+                                        <div style={{ position:'relative' }}>
+                                          <img src={rec.imageUrl} alt="wound" style={{ width:'100%', height:145, objectFit:'cover', display:'block', cursor:'pointer', opacity:selectMode&&!isChosen?.6:1 }} />
+                                          <div style={{ position:'absolute', top:8, left:8, background:'rgba(15,23,42,0.75)', borderRadius:6, padding:'2px 8px', fontSize:11, color:'#fff', fontWeight:700 }}>ภาพที่ {photoNum}</div>
+                                          <div style={{ position:'absolute', bottom:8, left:8 }}>
+                                            <div style={{ background:'rgba(0,0,0,0.65)', borderRadius:6, padding:'2px 8px', fontSize:12, color:'#fff', fontWeight:600 }}>🕐 {rec.time||'--:--'}</div>
+                                          </div>
+                                          {selectMode && <div style={{ position:'absolute', top:8, right:8, width:26, height:26, borderRadius:'50%', background:isChosen?'#0ea5e9':'rgba(0,0,0,0.4)', border:'2px solid '+(isChosen?'#0ea5e9':'#fff'), display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'#fff', fontWeight:700 }}>{isChosen?'✓':''}</div>}
+                                        </div>
+                                        <div style={{ padding:'9px 12px' }}>
+                                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                            <span className="badge" style={{ background:getStatus(rec.status).color+'22', color:getStatus(rec.status).color }}>{getStatus(rec.status).label}</span>
+                                            {!selectMode && (
+                                              <div style={{ display:'flex', gap:6 }}>
+                                                <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px' }}
+                                                  onClick={e=>{ e.stopPropagation(); setEditRecForm({status:rec.status,note:rec.note||'',date:rec.date,shift:rec.shift||'',newImageUrl:null,newFile:null}); setEditingRecord(rec) }}>✏️</button>
+                                                <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px', color:'#f87171', borderColor:'rgba(239,68,68,.25)' }}
+                                                  onClick={e=>{ e.stopPropagation(); setConfirmDeleteRec(rec) }}>🗑️</button>
+                                              </div>
+                                            )}
+                                          </div>
+                                          {rec.note && <div style={{ fontSize:12, color:'#94a3b8', marginTop:5, lineHeight:1.5 }}>{rec.note}</div>}
+                                        </div>
                                       </div>
-                                    )}
-                                  </div>
-                                  {rec.note && <div style={{ fontSize:12, color:'#94a3b8', marginTop:5, lineHeight:1.5 }}>{rec.note}</div>}
+                                    )
+                                  })}
                                 </div>
                               </div>
                             )
@@ -684,6 +767,23 @@ export default function App() {
               <div style={{ marginBottom:13 }}>
                 <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>วันที่ถ่ายภาพ</label>
                 <input type="date" value={uploadForm.date} onChange={e=>setUploadForm(f=>({...f,date:e.target.value}))} />
+              </div>
+              <div style={{ marginBottom:13 }}>
+                <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>เวร</label>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
+                  {[{v:'morning',l:'🌅 เวรเช้า'},{v:'afternoon',l:'🌤️ เวรบ่าย'},{v:'night',l:'🌙 เวรดึก'}].map(s=>(
+                    <button key={s.v} type="button"
+                      className="btn"
+                      style={{ padding:'10px 0', fontSize:13, fontWeight:600,
+                        background: uploadForm.shift===s.v ? 'linear-gradient(135deg,#0ea5e9,#0284c7)' : 'rgba(255,255,255,0.07)',
+                        color: uploadForm.shift===s.v ? '#fff' : '#94a3b8',
+                        border: uploadForm.shift===s.v ? 'none' : '1px solid rgba(255,255,255,0.1)'
+                      }}
+                      onClick={()=>setUploadForm(f=>({...f,shift:f.shift===s.v?'':s.v}))}>
+                      {s.l}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div style={{ marginBottom:13 }}>
                 <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>สถานะแผล</label>
@@ -853,21 +953,27 @@ export default function App() {
 
             {/* ปุ่มดาวน์โหลดทั้งหมด */}
             {exportImages.length > 0 && (
-              <button className="btn btn-blue" style={{ width:'100%', marginBottom:16, fontSize:15, padding:'12px 0' }}
-                onClick={() => {
-                  exportImages.forEach((item, i) => {
-                    setTimeout(() => {
-                      const a = document.createElement('a')
-                      a.href = item.url
-                      a.download = `wound_POD${item.pod}_${selectedSite?.name}_${item.date}.jpg`
-                      document.body.appendChild(a)
-                      a.click()
-                      document.body.removeChild(a)
-                    }, i * 600)
-                  })
-                }}>
-                ⬇️ ดาวน์โหลดทั้งหมดพร้อมกัน ({exportImages.length} ภาพ)
-              </button>
+              <div style={{ display:'flex', gap:10, marginBottom:16 }}>
+                <button className="btn btn-blue" style={{ flex:2, fontSize:14, padding:'11px 0' }}
+                  onClick={() => mergeAndDownload(exportImages)}>
+                  📎 รวมเป็นไฟล์เดียว ({exportImages.length} ภาพ)
+                </button>
+                <button className="btn btn-ghost" style={{ flex:1, fontSize:13, padding:'11px 0' }}
+                  onClick={() => {
+                    exportImages.forEach((item, i) => {
+                      setTimeout(() => {
+                        const a = document.createElement('a')
+                        a.href = item.url
+                        a.download = `wound_POD${item.pod}_${selectedSite?.name}_${item.date}.jpg`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                      }, i * 600)
+                    })
+                  }}>
+                  ⬇️ แยกไฟล์
+                </button>
+              </div>
             )}
 
             {exportImages.length === 0 && <div style={{ textAlign:'center', padding:60, color:'#64748b' }}><div className="spinner" style={{ margin:'0 auto 16px' }} /><div>กำลังสร้างภาพ...</div></div>}
@@ -888,7 +994,7 @@ export default function App() {
             {exportImages.length > 0 && (
               <div style={{ marginTop:16, padding:'14px 16px', background:'rgba(14,165,233,0.08)', borderRadius:12, fontSize:13, color:'#94a3b8', lineHeight:1.8 }}>
                 💡 <strong style={{ color:'#e2e8f0' }}>วิธีส่ง LINE:</strong><br/>
-                1. กด <strong style={{color:'#e2e8f0'}}>ดาวน์โหลดทั้งหมด</strong> → บันทึกลงเครื่อง<br/>
+                1. กด <strong style={{color:'#e2e8f0'}}>📎 รวมเป็นไฟล์เดียว</strong> → ได้ภาพยาวๆ ไฟล์เดียวส่ง LINE ได้เลย<br/>
                 2. เปิด LINE → เลือกแชทแพทย์ → แนบรูปจาก Camera Roll
               </div>
             )}
