@@ -69,6 +69,9 @@ export default function App() {
   const [editingSite, setEditingSite] = useState(null)
 
   const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0] })
+  const [editingRecord, setEditingRecord] = useState(null) // record being edited
+  const [editRecForm, setEditRecForm] = useState({ status: 'normal', note: '', date: '', newImageUrl: null, newFile: null })
+  const [confirmDeleteRec, setConfirmDeleteRec] = useState(null) // record to delete
   const [compareMode, setCompareMode] = useState({ a: null, b: null })
   const [lightboxImg, setLightboxImg] = useState(null)
   const [selectMode, setSelectMode] = useState(false)
@@ -182,6 +185,70 @@ export default function App() {
   }
 
   // ── Upload photo ──
+  // ── Edit record ──
+  const handleUpdateRecord = async () => {
+    if (!editingRecord) return
+    setSaving(true)
+    try {
+      const recDate = editRecForm.date || editingRecord.date
+      const recDay = Math.max(0, Math.floor((new Date(recDate) - new Date(selectedPatient.surgery_date)) / 86400000))
+      let imageUrl = editingRecord.imageUrl
+      // Replace image if new file selected
+      if (editRecForm.newFile) {
+        // Delete old image
+        try {
+          const oldPath = editingRecord.imageUrl.split('/wound-images/')[1]
+          if (oldPath) await supabase.storage.from('wound-images').remove([oldPath])
+        } catch(e) { console.log('old img delete:', e) }
+        // Upload new image
+        const ext = editRecForm.newFile.name.split('.').pop()
+        const fileName = `${selectedSite.id}/${Date.now()}.${ext}`
+        const { error: upErr } = await supabase.storage
+          .from('wound-images')
+          .upload(fileName, editRecForm.newFile, { contentType: editRecForm.newFile.type })
+        if (upErr) throw upErr
+        const { data: urlData } = supabase.storage.from('wound-images').getPublicUrl(fileName)
+        imageUrl = urlData.publicUrl
+      }
+      await supabase.from('wound_records').update({
+        status: editRecForm.status,
+        note: editRecForm.note,
+        date: recDate,
+        day: recDay,
+        image_url: imageUrl,
+      }).eq('id', editingRecord.id)
+      await loadAll()
+      showToast('✅ แก้ไขบันทึกแล้ว')
+    } catch(e) {
+      showToast('❌ แก้ไขไม่สำเร็จ: ' + e.message)
+    }
+    setSaving(false)
+    setEditingRecord(null)
+  }
+
+  // ── Delete record ──
+  const handleDeleteRecord = async (rec) => {
+    setSaving(true)
+    // Delete image from storage
+    try {
+      const path = rec.imageUrl.split('/wound-images/')[1]
+      if (path) await supabase.storage.from('wound-images').remove([path])
+    } catch(e) { console.log('storage delete:', e) }
+    await supabase.from('wound_records').delete().eq('id', rec.id)
+    await loadAll()
+    setSaving(false)
+    setConfirmDeleteRec(null)
+    showToast('🗑️ ลบภาพแล้ว')
+  }
+
+  const handleEditImageChange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setEditRecForm(f => ({ ...f, newImageUrl: ev.target.result, newFile: file }))
+    reader.readAsDataURL(file)
+  }
+
   const handleImageChange = (e) => {
     const file = e.target.files[0]
     if (!file) return
@@ -577,7 +644,17 @@ export default function App() {
                                   {selectMode && <div style={{ position:'absolute', top:8, right:8, width:26, height:26, borderRadius:'50%', background:isChosen?'#0ea5e9':'rgba(0,0,0,0.4)', border:'2px solid '+(isChosen?'#0ea5e9':'#fff'), display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, color:'#fff', fontWeight:700 }}>{isChosen?'✓':''}</div>}
                                 </div>
                                 <div style={{ padding:'9px 12px' }}>
-                                  <span className="badge" style={{ background:getStatus(rec.status).color+'22', color:getStatus(rec.status).color }}>{getStatus(rec.status).label}</span>
+                                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                    <span className="badge" style={{ background:getStatus(rec.status).color+'22', color:getStatus(rec.status).color }}>{getStatus(rec.status).label}</span>
+                                    {!selectMode && (
+                                      <div style={{ display:'flex', gap:6 }}>
+                                        <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px' }}
+                                          onClick={e=>{ e.stopPropagation(); setEditRecForm({status:rec.status,note:rec.note||'',date:rec.date}); setEditingRecord(rec) }}>✏️</button>
+                                        <button className="btn btn-ghost" style={{ fontSize:10, padding:'2px 8px', color:'#f87171', borderColor:'rgba(239,68,68,.25)' }}
+                                          onClick={e=>{ e.stopPropagation(); setConfirmDeleteRec(rec) }}>🗑️</button>
+                                      </div>
+                                    )}
+                                  </div>
                                   {rec.note && <div style={{ fontSize:12, color:'#94a3b8', marginTop:5, lineHeight:1.5 }}>{rec.note}</div>}
                                 </div>
                               </div>
@@ -699,6 +776,66 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* EDIT RECORD MODAL */}
+      {editingRecord && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:998, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div className="card" style={{ maxWidth:440, width:'100%', padding:'24px 24px' }}>
+            <div style={{ fontWeight:700, fontSize:17, marginBottom:18 }}>✏️ แก้ไขบันทึกภาพ</div>
+            <div style={{ marginBottom:12, position:'relative' }}>
+              <img src={editRecForm.newImageUrl || editingRecord.imageUrl} alt="wound" style={{ width:'100%', height:160, objectFit:'cover', borderRadius:10, display:'block' }} />
+              <label style={{ position:'absolute', bottom:8, right:8, background:'rgba(14,165,233,0.9)', color:'#fff', borderRadius:8, padding:'4px 12px', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                🔄 เปลี่ยนภาพ
+                <input type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={handleEditImageChange} />
+              </label>
+              {editRecForm.newImageUrl && (
+                <div style={{ position:'absolute', top:8, left:8, background:'rgba(34,197,94,0.9)', color:'#fff', borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700 }}>
+                  ✓ ภาพใหม่
+                </div>
+              )}
+            </div>
+            <div style={{ marginBottom:13 }}>
+              <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>วันที่</label>
+              <input type="date" value={editRecForm.date} onChange={e=>setEditRecForm(f=>({...f,date:e.target.value}))} />
+            </div>
+            <div style={{ marginBottom:13 }}>
+              <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>สถานะแผล</label>
+              <select value={editRecForm.status} onChange={e=>setEditRecForm(f=>({...f,status:e.target.value}))}>
+                {WOUND_STATUS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:20 }}>
+              <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>หมายเหตุ</label>
+              <textarea rows={3} value={editRecForm.note} onChange={e=>setEditRecForm(f=>({...f,note:e.target.value}))} style={{ resize:'none' }} placeholder="หมายเหตุ..." />
+            </div>
+            <div style={{ display:'flex', gap:11 }}>
+              <button className="btn btn-blue" style={{ flex:1 }} disabled={saving} onClick={handleUpdateRecord}>{saving?'⏳...':'บันทึก'}</button>
+              <button className="btn btn-ghost" onClick={()=>{ setEditingRecord(null); setEditRecForm({status:'normal',note:'',date:'',newImageUrl:null,newFile:null}) }}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM DELETE RECORD */}
+      {confirmDeleteRec && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.75)', zIndex:998, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div className="card" style={{ maxWidth:380, width:'100%', padding:'24px 24px', textAlign:'center' }}>
+            <div style={{ fontSize:32, marginBottom:12 }}>🗑️</div>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>ยืนยันการลบภาพ</div>
+            <img src={confirmDeleteRec.imageUrl} alt="wound" style={{ width:'100%', height:140, objectFit:'cover', borderRadius:10, display:'block', marginBottom:12 }} />
+            <div style={{ fontSize:13, color:'#94a3b8', marginBottom:8 }}>POD {confirmDeleteRec.day} · {formatDate(confirmDeleteRec.date)}</div>
+            <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:10, padding:'10px 14px', marginBottom:18, fontSize:13, color:'#fca5a5' }}>
+              ⚠️ ลบภาพนี้อย่างถาวร ไม่สามารถกู้คืนได้
+            </div>
+            <div style={{ display:'flex', gap:12 }}>
+              <button className="btn" style={{ flex:1, background:'linear-gradient(135deg,#ef4444,#dc2626)', color:'#fff' }} onClick={()=>handleDeleteRecord(confirmDeleteRec)}>
+                {saving?'⏳...':'ยืนยันลบ'}
+              </button>
+              <button className="btn btn-ghost" style={{ flex:1 }} onClick={()=>setConfirmDeleteRec(null)}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* EXPORT MODAL */}
       {showExport && (
