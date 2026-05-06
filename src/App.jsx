@@ -54,6 +54,8 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
+  const [showStorage, setShowStorage] = useState(false)
+  const [storageStats, setStorageStats] = useState(null)
 
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [selectedSite, setSelectedSite] = useState(null)
@@ -82,6 +84,43 @@ export default function App() {
   const fileRef = useRef()
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+
+  const fetchStorageStats = async () => {
+    setShowStorage(true)
+    setStorageStats(null)
+    try {
+      // Count records and patients
+      const [{ count: patCount }, { count: siteCount }, { count: recCount }] = await Promise.all([
+        supabase.from('patients').select('*', { count: 'exact', head: true }),
+        supabase.from('wound_sites').select('*', { count: 'exact', head: true }),
+        supabase.from('wound_records').select('*', { count: 'exact', head: true }),
+      ])
+      // Estimate storage: avg 350KB per image
+      const estImageMB = ((recCount || 0) * 350) / 1024
+      const maxImageMB = 1024 // 1GB free
+      const imagePercent = Math.min(100, (estImageMB / maxImageMB) * 100)
+      // DB estimate: avg 1KB per record
+      const estDBKB = ((recCount || 0) * 1 + (siteCount || 0) * 0.5 + (patCount || 0) * 0.5)
+      const estDBMB = estDBKB / 1024
+      const maxDBMB = 500
+      const dbPercent = Math.min(100, (estDBMB / maxDBMB) * 100)
+      setStorageStats({
+        patients: patCount || 0,
+        sites: siteCount || 0,
+        records: recCount || 0,
+        estImageMB: estImageMB.toFixed(1),
+        maxImageMB,
+        imagePercent: imagePercent.toFixed(1),
+        estDBMB: estDBMB.toFixed(2),
+        maxDBMB,
+        dbPercent: dbPercent.toFixed(1),
+        remainingImages: Math.floor((maxImageMB - estImageMB) / 0.35),
+      })
+    } catch(e) {
+      console.error(e)
+      setStorageStats({ error: e.message })
+    }
+  }
 
   // ── Load all data ──
   useEffect(() => {
@@ -439,6 +478,7 @@ export default function App() {
         {saving && <div style={{ fontSize:12, color:'#94a3b8', marginLeft:8 }}>⏳ กำลังบันทึก...</div>}
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
           <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12 }} onClick={() => { setSelectedPatient(null); setSelectedSite(null); setView('list') }}>🏠 หน้าหลัก</button>
+          <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12, color:'#34d399' }} onClick={fetchStorageStats}>💾 พื้นที่</button>
           {selectedPatient && <>
             <span style={{ color:'#334155' }}>›</span>
             <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12 }} onClick={() => { setSelectedSite(null); setView('patient') }}>{selectedPatient.name.split(' ')[0]}</button>
@@ -933,6 +973,101 @@ export default function App() {
               </button>
               <button className="btn btn-ghost" style={{ flex:1 }} onClick={()=>setConfirmDeleteRec(null)}>ยกเลิก</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* STORAGE MODAL */}
+      {showStorage && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:999, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+          <div className="card" style={{ maxWidth:460, width:'100%', padding:'26px 24px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+              <div style={{ fontWeight:700, fontSize:18 }}>💾 การใช้พื้นที่จัดเก็บ</div>
+              <button className="btn btn-ghost" onClick={()=>setShowStorage(false)}>✕</button>
+            </div>
+
+            {!storageStats && (
+              <div style={{ textAlign:'center', padding:40, color:'#64748b' }}>
+                <div className="spinner" style={{ margin:'0 auto 12px' }} />
+                <div>กำลังตรวจสอบ...</div>
+              </div>
+            )}
+
+            {storageStats?.error && (
+              <div style={{ color:'#f87171', textAlign:'center', padding:20 }}>❌ {storageStats.error}</div>
+            )}
+
+            {storageStats && !storageStats.error && (
+              <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+
+                {/* Summary */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10 }}>
+                  {[
+                    { label:'ผู้ป่วย', value:storageStats.patients, icon:'👤' },
+                    { label:'ตำแหน่งแผล', value:storageStats.sites, icon:'📍' },
+                    { label:'ภาพทั้งหมด', value:storageStats.records, icon:'📷' },
+                  ].map(item => (
+                    <div key={item.label} style={{ background:'rgba(255,255,255,0.05)', borderRadius:12, padding:'14px 10px', textAlign:'center' }}>
+                      <div style={{ fontSize:22, marginBottom:4 }}>{item.icon}</div>
+                      <div style={{ fontWeight:700, fontSize:20, color:'#e2e8f0' }}>{item.value}</div>
+                      <div style={{ fontSize:11, color:'#64748b', marginTop:2 }}>{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Image Storage Bar */}
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                    <span style={{ fontSize:14, fontWeight:600 }}>🖼️ พื้นที่เก็บภาพ</span>
+                    <span style={{ fontSize:13, color:'#94a3b8' }}>{storageStats.estImageMB} MB / {storageStats.maxImageMB} MB</span>
+                  </div>
+                  <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:8, height:12, overflow:'hidden' }}>
+                    <div style={{
+                      height:'100%', borderRadius:8, transition:'width .5s',
+                      width:`${storageStats.imagePercent}%`,
+                      background: storageStats.imagePercent > 80 ? 'linear-gradient(90deg,#ef4444,#dc2626)'
+                        : storageStats.imagePercent > 50 ? 'linear-gradient(90deg,#f97316,#ea580c)'
+                        : 'linear-gradient(90deg,#22c55e,#16a34a)'
+                    }} />
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginTop:6 }}>
+                    <span style={{ fontSize:12, color: storageStats.imagePercent > 80 ? '#f87171' : '#64748b' }}>
+                      ใช้ไป {storageStats.imagePercent}%
+                    </span>
+                    <span style={{ fontSize:12, color:'#64748b' }}>
+                      รับภาพได้อีกประมาณ {storageStats.remainingImages.toLocaleString()} ภาพ
+                    </span>
+                  </div>
+                </div>
+
+                {/* DB Storage Bar */}
+                <div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                    <span style={{ fontSize:14, fontWeight:600 }}>🗄️ ฐานข้อมูล</span>
+                    <span style={{ fontSize:13, color:'#94a3b8' }}>{storageStats.estDBMB} MB / {storageStats.maxDBMB} MB</span>
+                  </div>
+                  <div style={{ background:'rgba(255,255,255,0.08)', borderRadius:8, height:12, overflow:'hidden' }}>
+                    <div style={{
+                      height:'100%', borderRadius:8,
+                      width:`${storageStats.dbPercent}%`,
+                      background:'linear-gradient(90deg,#0ea5e9,#0284c7)'
+                    }} />
+                  </div>
+                  <div style={{ marginTop:6 }}>
+                    <span style={{ fontSize:12, color:'#64748b' }}>ใช้ไป {storageStats.dbPercent}%</span>
+                  </div>
+                </div>
+
+                {/* Tips */}
+                <div style={{ background:'rgba(14,165,233,0.08)', borderRadius:12, padding:'14px 16px', fontSize:13, color:'#94a3b8', lineHeight:1.8 }}>
+                  💡 <strong style={{ color:'#e2e8f0' }}>เพิ่มพื้นที่ว่างค่ะ</strong><br/>
+                  • ลบผู้ป่วยที่จำหน่ายแล้วออกจากระบบ<br/>
+                  • ลบภาพที่ไม่จำเป็นทีละใบด้วยปุ่ม 🗑️<br/>
+                  • พื้นที่จะคืนทันทีเมื่อลบค่ะ
+                </div>
+
+              </div>
+            )}
           </div>
         </div>
       )}
