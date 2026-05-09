@@ -61,7 +61,7 @@ export default function App() {
   const [selectedSite, setSelectedSite] = useState(null)
   const [view, setView] = useState('list')
 
-  const EMPTY_P = { name: '', age: '', hn: '', surgery: '', surgeryDate: '' }
+  const EMPTY_P = { name: '', age: '', hn: '', bed: '', doctor: '', surgery: '', surgeryDate: '' }
   const [patientForm, setPatientForm] = useState(EMPTY_P)
   const [editingPatient, setEditingPatient] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -165,6 +165,8 @@ export default function App() {
       name: patientForm.name.trim(),
       age: Number(patientForm.age) || 0,
       hn: patientForm.hn.trim(),
+      bed: patientForm.bed.trim(),
+      doctor: patientForm.doctor.trim(),
       surgery: patientForm.surgery.trim(),
       surgery_date: patientForm.surgeryDate || null,
     }
@@ -518,14 +520,15 @@ export default function App() {
                         </div>
                         <div style={{ flex:1 }}>
                           <div style={{ fontWeight:700, fontSize:15 }}>{p.name}</div>
-                          <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>{p.id} · HN: {p.hn} · อายุ {p.age} ปี</div>
+                          <div style={{ fontSize:12, color:'#94a3b8', marginTop:2 }}>{p.id} · HN: {p.hn} · อายุ {p.age} ปี{p.bed ? ` · เตียง ${p.bed}` : ''}</div>
+                          {p.doctor && <div style={{ fontSize:12, color:'#64748b', marginTop:1 }}>👨‍⚕️ {p.doctor}</div>}
                           <div style={{ fontSize:12, color:'#64748b', marginTop:1 }}>🔪 {p.surgery} · {formatDate(p.surgery_date)}</div>
                         </div>
                         <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4, flexShrink:0 }}>
                           <div style={{ fontSize:13, color:'#0ea5e9', fontWeight:700 }}>POD {daysSince(p.surgery_date)}</div>
                           <div style={{ fontSize:12, color:'#64748b' }}>{sites.length} ตำแหน่ง · {totalPics} ภาพ</div>
                           <div style={{ display:'flex', gap:6 }}>
-                            <button className="btn btn-ghost" style={{ fontSize:11, padding:'3px 10px' }} onClick={e => { e.stopPropagation(); setPatientForm({ name:p.name, age:String(p.age), hn:p.hn||'', surgery:p.surgery||'', surgeryDate:p.surgery_date||'' }); setEditingPatient(p); setView('editPatient') }}>✏️</button>
+                            <button className="btn btn-ghost" style={{ fontSize:11, padding:'3px 10px' }} onClick={e => { e.stopPropagation(); setPatientForm({ name:p.name, age:String(p.age), hn:p.hn||'', bed:p.bed||'', doctor:p.doctor||'', surgery:p.surgery||'', surgeryDate:p.surgery_date||'' }); setEditingPatient(p); setView('editPatient') }}>✏️</button>
                             <button className="btn btn-ghost" style={{ fontSize:11, padding:'3px 10px', color:'#f87171', borderColor:'rgba(239,68,68,.25)' }} onClick={e => { e.stopPropagation(); setConfirmDelete(p) }}>🗑️</button>
                           </div>
                         </div>
@@ -546,6 +549,12 @@ export default function App() {
               <div style={{ display:'grid', gap:14 }}>
                 <div><label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>ชื่อ-นามสกุล *</label>
                   <input placeholder="เช่น นายสมชาย ใจดี" value={patientForm.name} onChange={e => setPatientForm(f=>({...f,name:e.target.value}))} /></div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                  <div><label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>เตียง</label>
+                    <input placeholder="เช่น 1, 2A, ICU-3" value={patientForm.bed} onChange={e => setPatientForm(f=>({...f,bed:e.target.value}))} /></div>
+                  <div><label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>แพทย์ผู้ดูแล</label>
+                    <input placeholder="เช่น นพ.สมชาย" value={patientForm.doctor} onChange={e => setPatientForm(f=>({...f,doctor:e.target.value}))} /></div>
+                </div>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
                   <div><label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>อายุ (ปี)</label>
                     <input type="number" placeholder="45" value={patientForm.age} onChange={e => setPatientForm(f=>({...f,age:e.target.value}))} /></div>
@@ -574,7 +583,8 @@ export default function App() {
               <div style={{ display:'flex', alignItems:'flex-start', gap:14, flexWrap:'wrap' }}>
                 <div style={{ flex:1 }}>
                   <div style={{ fontWeight:700, fontSize:17 }}>{selectedPatient.name}</div>
-                  <div style={{ fontSize:12, color:'#94a3b8', marginTop:3 }}>{selectedPatient.id} · HN: {selectedPatient.hn} · อายุ {selectedPatient.age} ปี</div>
+                  <div style={{ fontSize:12, color:'#94a3b8', marginTop:3 }}>{selectedPatient.id} · HN: {selectedPatient.hn} · อายุ {selectedPatient.age} ปี{selectedPatient.bed ? ` · เตียง ${selectedPatient.bed}` : ''}</div>
+                  {selectedPatient.doctor && <div style={{ fontSize:12, color:'#64748b', marginTop:1 }}>👨‍⚕️ แพทย์ผู้ดูแล: {selectedPatient.doctor}</div>}
                   <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>🔪 {selectedPatient.surgery} · {formatDate(selectedPatient.surgery_date)} · <strong style={{ color:'#0ea5e9' }}>POD {daysSince(selectedPatient.surgery_date)}</strong></div>
                 </div>
                 <button className="btn btn-blue" onClick={() => { setAddSiteForm({ name:'', location:'' }); setView('addSite') }}>+ เพิ่มตำแหน่งแผล</button>
@@ -798,7 +808,8 @@ export default function App() {
           <div style={{ maxWidth:500, margin:'0 auto' }}>
             <div className="card" style={{ padding:'24px 24px' }}>
               <div style={{ fontWeight:700, fontSize:17, marginBottom:5 }}>📸 บันทึกภาพแผล</div>
-              <div style={{ fontSize:13, color:'#94a3b8', marginBottom:18 }}>{selectedPatient.name} · <strong>{selectedSite.name}</strong> · POD {daysSince(selectedPatient.surgery_date)}</div>
+              <div style={{ fontSize:13, color:'#94a3b8', marginBottom:5 }}>{selectedPatient.name} · <strong>{selectedSite.name}</strong></div>
+              <div style={{ fontSize:12, color:'#64748b', marginBottom:18 }}>POD {daysSince(selectedPatient.surgery_date)}{selectedPatient.bed ? ` · เตียง ${selectedPatient.bed}` : ''}{selectedPatient.doctor ? ` · ${selectedPatient.doctor}` : ''}</div>
               <div className="upload-zone" style={{ marginBottom:16 }} onClick={() => fileRef.current.click()}>
                 {uploadForm.imageUrl ? <img src={uploadForm.imageUrl} alt="preview" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
                   <><div style={{ fontSize:32, marginBottom:7 }}>📷</div><div style={{ fontSize:13, color:'#64748b' }}>แตะเพื่อเลือกหรือถ่ายภาพ</div></>}
