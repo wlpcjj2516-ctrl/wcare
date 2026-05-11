@@ -52,6 +52,10 @@ export default function App() {
   const [woundSites, setWoundSites] = useState({}) // { patientId: [site] }
   const [records, setRecords] = useState({})        // { siteId: [record] }
   const [loading, setLoading] = useState(true)
+  const [currentUser, setCurrentUser] = useState(null) // logged in user
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' })
+  const [loginError, setLoginError] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
   const [showStorage, setShowStorage] = useState(false)
@@ -70,7 +74,8 @@ export default function App() {
   const [editSiteForm, setEditSiteForm] = useState({ name: '', location: '' })
   const [editingSite, setEditingSite] = useState(null)
 
-  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0], shift: '' })
+  const [uploadForm, setUploadForm] = useState({ status: 'normal', note: '', date: new Date().toISOString().split('T')[0], shift: '' })
+  const [uploadImages, setUploadImages] = useState([]) // [{file, previewUrl}]
   const [editingRecord, setEditingRecord] = useState(null) // record being edited
   const [editRecForm, setEditRecForm] = useState({ status: 'normal', note: '', date: '', newImageUrl: null, newFile: null })
   const [confirmDeleteRec, setConfirmDeleteRec] = useState(null) // record to delete
@@ -123,10 +128,6 @@ export default function App() {
   }
 
   // ── Load all data ──
-  useEffect(() => {
-    loadAll()
-  }, [])
-
   const loadAll = async () => {
     setLoading(true)
     try {
@@ -154,6 +155,52 @@ export default function App() {
     } catch (e) { console.error(e) }
     setLoading(false)
   }
+
+  const handleLogin = async () => {
+    if (!loginForm.username || !loginForm.password) {
+      setLoginError('กรุณากรอก Username และ Password ค่ะ')
+      return
+    }
+    setLoginLoading(true)
+    setLoginError('')
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', loginForm.username.trim())
+        .eq('password', loginForm.password)
+        .single()
+      if (error || !data) {
+        setLoginError('Username หรือ Password ไม่ถูกต้อง กรุณาลองใหม่ค่ะ')
+      } else {
+        setCurrentUser(data)
+        sessionStorage.setItem('wcare_user', JSON.stringify(data))
+        await loadAll()
+      }
+    } catch(e) {
+      setLoginError('เกิดข้อผิดพลาด กรุณาลองใหม่ค่ะ')
+    }
+    setLoginLoading(false)
+  }
+
+  const handleLogout = () => {
+    setCurrentUser(null)
+    sessionStorage.removeItem('wcare_user')
+    setSelectedPatient(null)
+    setSelectedSite(null)
+    setView('list')
+  }
+
+  // Check saved session on mount
+  useEffect(() => {
+    const saved = sessionStorage.getItem('wcare_user')
+    if (saved) {
+      setCurrentUser(JSON.parse(saved))
+      loadAll()
+    } else {
+      setLoading(false)
+    }
+  }, [])
 
   const patientSites = selectedPatient ? (woundSites[selectedPatient.id] || []) : []
   const siteRecords = selectedSite ? (records[selectedSite.id] || []) : []
@@ -299,36 +346,37 @@ export default function App() {
   }
 
   const handleUpload = async () => {
-    if (!uploadForm.file) return
+    if (!uploadImages.length) return
     setSaving(true)
     try {
-      // Upload image to Supabase Storage
-      const ext = uploadForm.file.name.split('.').pop()
-      const fileName = `${selectedSite.id}/${Date.now()}.${ext}`
-      const { data: upData, error: upErr } = await supabase.storage
-        .from('wound-images')
-        .upload(fileName, uploadForm.file, { contentType: uploadForm.file.type })
-      if (upErr) throw upErr
-      const { data: urlData } = supabase.storage.from('wound-images').getPublicUrl(fileName)
-      const imageUrl = urlData.publicUrl
-
-      // Save record to DB
       const recDate = uploadForm.date || new Date().toISOString().split('T')[0]
       const recDay = Math.max(0, Math.floor((new Date(recDate) - new Date(selectedPatient.surgery_date)) / 86400000))
-      await supabase.from('wound_records').insert({
-        id: Date.now(),
-        site_id: selectedSite.id,
-        date: recDate,
-        day: recDay,
-        time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-        shift: uploadForm.shift,
-        status: uploadForm.status,
-        note: uploadForm.note,
-        image_url: imageUrl,
-      })
+      const now = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })
+      const insertData = []
+      for (let i = 0; i < uploadImages.length; i++) {
+        const { file } = uploadImages[i]
+        const ext = file.name.split('.').pop()
+        const fileName = `${selectedSite.id}/${Date.now()}_${i}.${ext}`
+        const { error: upErr } = await supabase.storage
+          .from('wound-images')
+          .upload(fileName, file, { contentType: file.type })
+        if (upErr) throw upErr
+        const { data: urlData } = supabase.storage.from('wound-images').getPublicUrl(fileName)
+        insertData.push({
+          id: Date.now() + i,
+          site_id: selectedSite.id,
+          date: recDate, day: recDay, time: now,
+          shift: uploadForm.shift,
+          status: uploadForm.status,
+          note: i === 0 ? uploadForm.note : '',
+          image_url: urlData.publicUrl,
+        })
+      }
+      await supabase.from('wound_records').insert(insertData)
       await loadAll()
-      showToast('✅ บันทึกภาพแผลแล้ว')
-      setUploadForm({ status: 'normal', note: '', imageUrl: null, file: null, date: new Date().toISOString().split('T')[0], shift: '' })
+      showToast(`✅ บันทึก ${uploadImages.length} ภาพแล้ว`)
+      setUploadImages([])
+      setUploadForm({ status: 'normal', note: '', date: new Date().toISOString().split('T')[0], shift: '' })
       setView('site')
     } catch (e) {
       console.error(e)
@@ -458,8 +506,50 @@ export default function App() {
     }
   }
 
+  // ── LOGIN SCREEN ──
+  if (!currentUser) return (
+    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#0f2744 100%)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'Sarabun,sans-serif', padding:20 }}>
+      <style>{css}</style>
+      <div style={{ width:'100%', maxWidth:400 }}>
+        <div style={{ textAlign:'center', marginBottom:32 }}>
+          <div style={{ fontSize:56, marginBottom:12 }}>🩹</div>
+          <div style={{ fontSize:24, fontWeight:800, color:'#e2e8f0', letterSpacing:1 }}>W-CARE</div>
+          <div style={{ fontSize:13, color:'#64748b', marginTop:4 }}>ระบบติดตามแผลผ่าตัด · โรงพยาบาลบึงกาฬ</div>
+        </div>
+        <div className="card" style={{ padding:'32px 28px' }}>
+          <div style={{ fontWeight:700, fontSize:18, marginBottom:6, color:'#e2e8f0' }}>เข้าสู่ระบบ</div>
+          <div style={{ fontSize:13, color:'#64748b', marginBottom:24 }}>กรุณาเข้าสู่ระบบเพื่อใช้งาน W-CARE</div>
+          <div style={{ marginBottom:14 }}>
+            <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>Username</label>
+            <input placeholder="กรอก Username" value={loginForm.username}
+              onChange={e=>setLoginForm(f=>({...f,username:e.target.value}))}
+              onKeyDown={e=>e.key==='Enter'&&handleLogin()} />
+          </div>
+          <div style={{ marginBottom:20 }}>
+            <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>Password</label>
+            <input type="password" placeholder="กรอก Password" value={loginForm.password}
+              onChange={e=>setLoginForm(f=>({...f,password:e.target.value}))}
+              onKeyDown={e=>e.key==='Enter'&&handleLogin()} />
+          </div>
+          {loginError && (
+            <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:10, padding:'10px 14px', marginBottom:16, fontSize:13, color:'#f87171' }}>
+              ❌ {loginError}
+            </div>
+          )}
+          <button className="btn btn-blue" style={{ width:'100%', padding:'12px 0', fontSize:15 }} onClick={handleLogin} disabled={loginLoading}>
+            {loginLoading ? '⏳ กำลังเข้าสู่ระบบ...' : '🔐 เข้าสู่ระบบ'}
+          </button>
+          <div style={{ marginTop:20, padding:'12px 14px', background:'rgba(14,165,233,0.06)', border:'1px solid rgba(14,165,233,0.15)', borderRadius:10, fontSize:12, color:'#64748b', lineHeight:1.8 }}>
+            🔒 ระบบนี้จัดเก็บข้อมูลผู้ป่วยภายใต้มาตรการ PDPA<br/>
+            การเข้าถึงข้อมูลจำกัดเฉพาะบุคลากรที่ได้รับอนุญาตเท่านั้น
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   if (loading) return (
-    <div style={{ minHeight:'100vh', background:'#0f172a', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, color:'#94a3b8', fontFamily:'Sarabun,sans-serif' }}>
+    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#0f172a,#1e293b)', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, color:'#94a3b8', fontFamily:'Sarabun,sans-serif' }}>
       <style>{css}</style>
       <div className="spinner" />
       <div>กำลังโหลดข้อมูล...</div>
@@ -481,6 +571,10 @@ export default function App() {
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
           <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12 }} onClick={() => { setSelectedPatient(null); setSelectedSite(null); setView('list') }}>🏠 หน้าหลัก</button>
           <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12, color:'#34d399' }} onClick={fetchStorageStats}>💾 พื้นที่</button>
+          <div style={{ display:'flex', alignItems:'center', gap:8, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8, padding:'4px 10px' }}>
+            <span style={{ fontSize:12, color:'#94a3b8' }}>👤 {currentUser?.name}</span>
+            <button className="btn btn-ghost" style={{ fontSize:11, padding:'2px 8px', color:'#f87171', borderColor:'rgba(239,68,68,0.25)' }} onClick={handleLogout}>ออกจากระบบ</button>
+          </div>
           {selectedPatient && <>
             <span style={{ color:'#334155' }}>›</span>
             <button className="btn btn-ghost" style={{ padding:'5px 11px', fontSize:12 }} onClick={() => { setSelectedSite(null); setView('patient') }}>{selectedPatient.name.split(' ')[0]}</button>
@@ -805,16 +899,37 @@ export default function App() {
 
         {/* ══ UPLOAD ══ */}
         {view === 'upload' && selectedSite && selectedPatient && (
-          <div style={{ maxWidth:500, margin:'0 auto' }}>
+          <div style={{ maxWidth:560, margin:'0 auto' }}>
             <div className="card" style={{ padding:'24px 24px' }}>
               <div style={{ fontWeight:700, fontSize:17, marginBottom:5 }}>📸 บันทึกภาพแผล</div>
-              <div style={{ fontSize:13, color:'#94a3b8', marginBottom:5 }}>{selectedPatient.name} · <strong>{selectedSite.name}</strong></div>
-              <div style={{ fontSize:12, color:'#64748b', marginBottom:18 }}>POD {daysSince(selectedPatient.surgery_date)}{selectedPatient.bed ? ` · เตียง ${selectedPatient.bed}` : ''}{selectedPatient.doctor ? ` · ${selectedPatient.doctor}` : ''}</div>
-              <div className="upload-zone" style={{ marginBottom:16 }} onClick={() => fileRef.current.click()}>
-                {uploadForm.imageUrl ? <img src={uploadForm.imageUrl} alt="preview" style={{ width:'100%', height:'100%', objectFit:'cover' }} /> :
-                  <><div style={{ fontSize:32, marginBottom:7 }}>📷</div><div style={{ fontSize:13, color:'#64748b' }}>แตะเพื่อเลือกหรือถ่ายภาพ</div></>}
-                <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:'none' }} onChange={handleImageChange} />
+              <div style={{ fontSize:13, color:'#94a3b8', marginBottom:3 }}>{selectedPatient.name} · <strong>{selectedSite.name}</strong></div>
+              <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>POD {daysSince(selectedPatient.surgery_date)}{selectedPatient.bed ? ` · เตียง ${selectedPatient.bed}` : ''}{selectedPatient.doctor ? ` · ${selectedPatient.doctor}` : ''}</div>
+
+              {/* Multi-image section */}
+              <div style={{ marginBottom:16 }}>
+                <label style={{ fontSize:13, color:'#94a3b8', marginBottom:8, display:'flex', justifyContent:'space-between' }}>
+                  <span>ภาพแผล {uploadImages.length > 0 ? `(${uploadImages.length} ภาพ)` : ''}</span>
+                  {uploadImages.length > 0 && <span style={{ color:'#0ea5e9', cursor:'pointer', fontSize:12 }} onClick={()=>fileRef.current.click()}>+ เพิ่มภาพอีก</span>}
+                </label>
+                {uploadImages.length > 0 && (
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))', gap:8, marginBottom:10 }}>
+                    {uploadImages.map((img, idx) => (
+                      <div key={idx} style={{ position:'relative', borderRadius:10, overflow:'hidden' }}>
+                        <img src={img.previewUrl} alt="" style={{ width:'100%', height:90, objectFit:'cover', display:'block' }} />
+                        <div style={{ position:'absolute', top:4, left:6, background:'rgba(15,23,42,0.8)', borderRadius:5, padding:'1px 6px', fontSize:11, color:'#fff', fontWeight:700 }}>ภาพ {idx+1}</div>
+                        <button onClick={()=>setUploadImages(prev=>prev.filter((_,i)=>i!==idx))}
+                          style={{ position:'absolute', top:3, right:3, background:'rgba(239,68,68,0.9)', border:'none', borderRadius:'50%', width:22, height:22, color:'#fff', cursor:'pointer', fontSize:14, lineHeight:1, display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="upload-zone" style={{ height: uploadImages.length>0 ? 70 : 160 }} onClick={() => fileRef.current.click()}>
+                  <div style={{ fontSize: uploadImages.length>0 ? 22 : 32, marginBottom:4 }}>📷</div>
+                  <div style={{ fontSize:13, color:'#64748b' }}>{uploadImages.length>0 ? '+ เพิ่มภาพอีก' : 'แตะเพื่อเลือกหรือถ่ายภาพ (เลือกได้หลายภาพ)'}</div>
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" multiple style={{ display:'none' }} onChange={handleImagesChange} />
               </div>
+
               <div style={{ marginBottom:13 }}>
                 <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>วันที่ถ่ายภาพ</label>
                 <input type="date" value={uploadForm.date} onChange={e=>setUploadForm(f=>({...f,date:e.target.value}))} />
@@ -823,8 +938,7 @@ export default function App() {
                 <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>เวร</label>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8 }}>
                   {[{v:'morning',l:'🌅 เวรเช้า'},{v:'afternoon',l:'🌤️ เวรบ่าย'},{v:'night',l:'🌙 เวรดึก'}].map(s=>(
-                    <button key={s.v} type="button"
-                      className="btn"
+                    <button key={s.v} type="button" className="btn"
                       style={{ padding:'10px 0', fontSize:13, fontWeight:600,
                         background: uploadForm.shift===s.v ? 'linear-gradient(135deg,#0ea5e9,#0284c7)' : 'rgba(255,255,255,0.07)',
                         color: uploadForm.shift===s.v ? '#fff' : '#94a3b8',
@@ -843,16 +957,19 @@ export default function App() {
                 </select>
               </div>
               <div style={{ marginBottom:20 }}>
-                <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>หมายเหตุ</label>
+                <label style={{ fontSize:13, color:'#94a3b8', marginBottom:7, display:'block' }}>หมายเหตุ (ใช้กับทุกภาพ)</label>
                 <textarea rows={3} placeholder="เช่น แผลแห้งดี ขอบแผลสนิทดี ไม่มีสิ่งคัดหลั่ง..." value={uploadForm.note} onChange={e=>setUploadForm(f=>({...f,note:e.target.value}))} style={{ resize:'none' }} />
               </div>
               <div style={{ display:'flex', gap:11 }}>
-                <button className="btn btn-blue" style={{ flex:1 }} onClick={handleUpload} disabled={!uploadForm.file||saving}>{saving?'⏳ กำลังอัปโหลด...':'บันทึก'}</button>
-                <button className="btn btn-ghost" onClick={()=>{ setUploadForm({status:'normal',note:'',imageUrl:null,file:null,date:new Date().toISOString().split('T')[0]}); setView('site') }}>ยกเลิก</button>
+                <button className="btn btn-blue" style={{ flex:1 }} onClick={handleUpload} disabled={uploadImages.length===0||saving}>
+                  {saving ? '⏳ กำลังอัปโหลด...' : `บันทึก ${uploadImages.length || 0} ภาพ`}
+                </button>
+                <button className="btn btn-ghost" onClick={()=>{ setUploadImages([]); setUploadForm({status:'normal',note:'',date:new Date().toISOString().split('T')[0],shift:''}); setView('site') }}>ยกเลิก</button>
               </div>
             </div>
           </div>
         )}
+
 
         {/* ══ COMPARE ══ */}
         {view === 'compare' && selectedSite && (
